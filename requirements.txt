@@ -1,0 +1,2 @@
+# Core dependencies
+# Add your dependencies here as the project grows
