@@ -333,7 +333,11 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
     video_cache_hits = 0
     channel_cache_hits = 0
     api_calls = 0
+    api_success = 0
+    api_errors = 0
+    consecutive_api_errors = 0
     errors = []
+    aborted = False
     
     with Cache() as cache:
         if verbose:
@@ -341,7 +345,8 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
             print(f"Cache: {stats['videos']} videos, {stats['channels']} channels")
         
         # Process videos with progress bar
-        for video in tqdm(videos, desc="Enriching videos", unit="video"):
+        progress = tqdm(videos, desc="Enriching videos", unit="video")
+        for video in progress:
             video_id = video['video_id']
             added_at = video['added_at']
 
@@ -356,17 +361,33 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                     api_calls += 1
 
                     if not video_metadata:
+                        api_errors += 1
+                        consecutive_api_errors += 1
+                        progress.set_postfix(success=api_success, errors=api_errors)
                         errors.append({'video_id': video_id, 'error': 'Video not found (may be deleted or private)'})
                         enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': 'Video not found'})
+                        if consecutive_api_errors >= 10:
+                            aborted = True
+                            break
                         continue
+
+                    api_success += 1
+                    consecutive_api_errors = 0
+                    progress.set_postfix(success=api_success, errors=api_errors)
 
                     video_extracted_at = datetime.now(timezone.utc).isoformat()
                     video_metadata['_extracted_at'] = video_extracted_at
                     cache.put_video(video_id, video_metadata)
                     video_payload = video_metadata.copy()
                 except requests.RequestException as e:
+                    api_errors += 1
+                    consecutive_api_errors += 1
+                    progress.set_postfix(success=api_success, errors=api_errors)
                     errors.append({'video_id': video_id, 'error': str(e)})
                     enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': str(e)})
+                    if consecutive_api_errors >= 10:
+                        aborted = True
+                        break
                     continue
 
             channel_id = video_payload.get('channel_id')
@@ -386,14 +407,27 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                             channel_metadata = fetch_channel_metadata(channel_id, api_key)
                             api_calls += 1
                             if channel_metadata:
+                                api_success += 1
+                                consecutive_api_errors = 0
+                                progress.set_postfix(success=api_success, errors=api_errors)
                                 channel_extracted_at = datetime.now(timezone.utc).isoformat()
                                 channel_metadata['_extracted_at'] = channel_extracted_at
                                 cache.put_channel(channel_id, channel_metadata)
                                 channel_data = channel_metadata.copy()
                             else:
+                                api_errors += 1
+                                consecutive_api_errors += 1
+                                progress.set_postfix(success=api_success, errors=api_errors)
                                 channel_data = None
                         except requests.RequestException:
+                            api_errors += 1
+                            consecutive_api_errors += 1
+                            progress.set_postfix(success=api_success, errors=api_errors)
                             channel_data = None
+
+                        if consecutive_api_errors >= 10:
+                            aborted = True
+                            break
 
                     if channel_data:
                         channel_extracted_at = channel_data.get('_extracted_at')
@@ -412,6 +446,14 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
             }
 
             enriched_videos.append(output_video)
+
+            if aborted:
+                break
+
+        if aborted:
+            progress.close()
+            print("Aborting: 10 consecutive API call errors.")
+            return
     
     # Write output JSON
     channels_output = {}
@@ -439,6 +481,8 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
             'video_cache_hits': video_cache_hits,
             'channel_cache_hits': channel_cache_hits,
             'api_calls': api_calls,
+            'api_success': api_success,
+            'api_errors': api_errors,
             'errors': len(errors),
         },
         'channels': channels_output,
