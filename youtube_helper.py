@@ -276,7 +276,7 @@ def fetch_channel_metadata(channel_id: str, api_key: str) -> Optional[dict]:
     """
     url = f"{YOUTUBE_API_BASE}/channels"
     params = {
-        'part': 'snippet,statistics',
+        'part': 'snippet,statistics,topicDetails,brandingSettings',
         'id': channel_id,
         'key': api_key,
     }
@@ -292,11 +292,23 @@ def fetch_channel_metadata(channel_id: str, api_key: str) -> Optional[dict]:
     item = data['items'][0]
     snippet = item.get('snippet', {})
     statistics = item.get('statistics', {})
-    
+    topic_details = item.get('topicDetails', {})
+    branding = item.get('brandingSettings', {})
+
+    thumbnails = snippet.get('thumbnails', {})
+    default_thumbnail = thumbnails.get('default', {}).get('url', '')
+
     return {
-        'channel_id': channel_id,
-        'channel_name': snippet.get('title', ''),
-        'channel_subscriber_count': statistics.get('subscriberCount'),
+        'id': channel_id,
+        'title': snippet.get('title', ''),
+        'publishedAt': snippet.get('publishedAt'),
+        'description': snippet.get('description', ''),
+        'url': f"https://www.youtube.com/channel/{channel_id}",
+        'thumbnail_url': default_thumbnail,
+        'country': snippet.get('country'),
+        'subscriber_count': statistics.get('subscriberCount'),
+        'topicIds': topic_details.get('topicIds', []),
+        'topicCategories': topic_details.get('topicCategories', []),
     }
 
 
@@ -317,6 +329,7 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
         print(f"Found {len(videos)} videos in playlist")
     
     enriched_videos = []
+    channels_by_id: dict[str, dict] = {}
     video_cache_hits = 0
     channel_cache_hits = 0
     api_calls = 0
@@ -331,110 +344,104 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
         for video in tqdm(videos, desc="Enriching videos", unit="video"):
             video_id = video['video_id']
             added_at = video['added_at']
-            
-            # Check cache first for video
+
             cached_video = cache.get_video(video_id)
-            
             if cached_video:
                 video_cache_hits += 1
                 video_extracted_at = cached_video.get('_extracted_at')
-                enriched = cached_video.copy()
+                video_payload = cached_video.copy()
             else:
-                # Fetch from API
                 try:
                     video_metadata = fetch_video_metadata(video_id, api_key)
                     api_calls += 1
-                    
+
                     if not video_metadata:
-                        # Video not found (deleted/private)
-                        errors.append({
-                            'video_id': video_id,
-                            'error': 'Video not found (may be deleted or private)',
-                        })
-                        enriched_videos.append({
-                            'video_id': video_id,
-                            'added_at': added_at,
-                            'error': 'Video not found',
-                        })
+                        errors.append({'video_id': video_id, 'error': 'Video not found (may be deleted or private)'})
+                        enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': 'Video not found'})
                         continue
-                    
-                    # Add extraction timestamp
+
                     video_extracted_at = datetime.now(timezone.utc).isoformat()
                     video_metadata['_extracted_at'] = video_extracted_at
-                    
-                    # Store in cache
                     cache.put_video(video_id, video_metadata)
-                    enriched = video_metadata.copy()
-                    
+                    video_payload = video_metadata.copy()
                 except requests.RequestException as e:
-                    errors.append({
-                        'video_id': video_id,
-                        'error': str(e),
-                    })
-                    enriched_videos.append({
-                        'video_id': video_id,
-                        'added_at': added_at,
-                        'error': str(e),
-                    })
+                    errors.append({'video_id': video_id, 'error': str(e)})
+                    enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': str(e)})
                     continue
-            
-            # Fetch channel data
-            channel_id = enriched.get('channel_id')
+
+            channel_id = video_payload.get('channel_id')
+            channel_extracted_at = None
+
             if channel_id:
-                cached_channel = cache.get_channel(channel_id)
-                
-                if cached_channel:
-                    channel_cache_hits += 1
-                    channel_extracted_at = cached_channel.get('_extracted_at')
-                    enriched['channel_name'] = cached_channel.get('channel_name')
-                    enriched['channel_subscriber_count'] = cached_channel.get('channel_subscriber_count')
+                if channel_id in channels_by_id:
+                    channel_data = channels_by_id[channel_id]
+                    channel_extracted_at = channel_data.get('_extracted_at')
                 else:
-                    try:
-                        channel_metadata = fetch_channel_metadata(channel_id, api_key)
-                        api_calls += 1
-                        
-                        if channel_metadata:
-                            # Add extraction timestamp
-                            channel_extracted_at = datetime.now(timezone.utc).isoformat()
-                            channel_metadata['_extracted_at'] = channel_extracted_at
-                            
-                            # Store in cache
-                            cache.put_channel(channel_id, channel_metadata)
-                            
-                            enriched['channel_name'] = channel_metadata.get('channel_name')
-                            enriched['channel_subscriber_count'] = channel_metadata.get('channel_subscriber_count')
-                        else:
-                            enriched['channel_name'] = None
-                            enriched['channel_subscriber_count'] = None
-                            channel_extracted_at = None
-                    except requests.RequestException:
-                        enriched['channel_name'] = None
-                        enriched['channel_subscriber_count'] = None
-                        channel_extracted_at = None
-            else:
-                channel_extracted_at = None
-            
-            # Add timestamps to output
-            enriched['video_data_extracted_at'] = video_extracted_at
-            enriched['channel_data_extracted_at'] = channel_extracted_at
-            enriched['added_at'] = added_at
-            
-            # Remove internal extraction timestamp before output
-            enriched.pop('_extracted_at', None)
-            
-            enriched_videos.append(enriched)
+                    cached_channel = cache.get_channel(channel_id)
+                    if cached_channel:
+                        channel_cache_hits += 1
+                        channel_data = cached_channel.copy()
+                    else:
+                        try:
+                            channel_metadata = fetch_channel_metadata(channel_id, api_key)
+                            api_calls += 1
+                            if channel_metadata:
+                                channel_extracted_at = datetime.now(timezone.utc).isoformat()
+                                channel_metadata['_extracted_at'] = channel_extracted_at
+                                cache.put_channel(channel_id, channel_metadata)
+                                channel_data = channel_metadata.copy()
+                            else:
+                                channel_data = None
+                        except requests.RequestException:
+                            channel_data = None
+
+                    if channel_data:
+                        channel_extracted_at = channel_data.get('_extracted_at')
+                        channels_by_id[channel_id] = channel_data
+
+            output_video = {
+                'video_id': video_id,
+                'title': video_payload.get('title'),
+                'description': video_payload.get('description'),
+                'thumbnail_url': video_payload.get('thumbnail_url'),
+                'channel_id': channel_id,
+                'statistics': video_payload.get('statistics'),
+                'topicDetails': video_payload.get('topicDetails'),
+                'video_data_extracted_at': video_payload.get('_extracted_at'),
+                'added_at': added_at,
+            }
+
+            enriched_videos.append(output_video)
     
     # Write output JSON
+    channels_output = {}
+    for cid, channel_data in channels_by_id.items():
+        channels_output[cid] = {
+            'id': channel_data.get('id', cid),
+            'title': channel_data.get('title'),
+            'publishedAt': channel_data.get('publishedAt'),
+            'channel_data_extracted_at': channel_data.get('_extracted_at'),
+            'subscriber_count': channel_data.get('subscriber_count'),
+            'url': channel_data.get('url'),
+            'description': channel_data.get('description'),
+            'thumbnail_url': channel_data.get('thumbnail_url'),
+            'country': channel_data.get('country'),
+            'topicIds': channel_data.get('topicIds', []),
+            'topicCategories': channel_data.get('topicCategories', []),
+        }
+
     output = {
         'metadata': {
             'source_file': str(input_path),
             'total_videos': len(videos),
+            'total_channels': len(channels_output),
             'enriched_at': datetime.now(timezone.utc).isoformat(),
             'video_cache_hits': video_cache_hits,
             'channel_cache_hits': channel_cache_hits,
             'api_calls': api_calls,
             'errors': len(errors),
         },
+        'channels': channels_output,
         'videos': enriched_videos,
     }
     
