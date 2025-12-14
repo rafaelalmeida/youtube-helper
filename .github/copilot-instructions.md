@@ -32,8 +32,17 @@ pip install -r requirements.txt
 python youtube_helper.py process --input <file> --output <file>
 python youtube_helper.py process -i input.txt -o output.txt --verbose
 
+# Enrich Google Takeout playlist with YouTube metadata
+python youtube_helper.py enrich -i takeout-playlist.csv -o enriched.json --api-key YOUR_KEY
+# Or use environment variable:
+export YOUTUBE_API_KEY=your_key
+python youtube_helper.py enrich -i takeout-playlist.csv -o enriched.json
+
 # View cache information
-python youtube_helper.py cache-info
+python youtube_helper.py cache info
+
+# Clear all cached data
+python youtube_helper.py cache purge
 ```
 
 ## Project Conventions
