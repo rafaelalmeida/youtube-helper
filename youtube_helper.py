@@ -376,18 +376,12 @@ def fetch_video_metadata(video_id: str, api_key: str) -> tuple[Optional[dict], O
     topic_details = item.get('topicDetails', {})
     status_info = item.get('status', {})
     
-    # Check privacy status
-    privacy_status = status_info.get('privacyStatus')
-    if privacy_status in ('private', 'unlisted'):
-        return None, {
-            'status_code': status_code,
-            'message': f'Video is {privacy_status}',
-            'privacyStatus': privacy_status,
-        }
-    
     # Extract default thumbnail URL
     thumbnails = snippet.get('thumbnails', {})
     default_thumbnail = thumbnails.get('default', {}).get('url', '')
+    
+    # Get privacy status
+    privacy_status = status_info.get('privacyStatus')
     
     return {
         'video_id': video_id,
@@ -395,6 +389,7 @@ def fetch_video_metadata(video_id: str, api_key: str) -> tuple[Optional[dict], O
         'description': snippet.get('description', ''),
         'thumbnail_url': default_thumbnail,
         'channel_id': snippet.get('channelId', ''),
+        'privacy_status': privacy_status,
         'statistics': {
             'viewCount': statistics.get('viewCount'),
             'likeCount': statistics.get('likeCount'),
@@ -515,8 +510,8 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                         write_error_to_log(video_id, error_msg, error_details=api_error if isinstance(api_error, dict) else None)
                         enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': error_msg})
                         
-                        # Only count as consecutive error if NOT "Video not found" or privacy issue
-                        is_not_found = 'not found' in error_msg.lower() or (isinstance(api_error, dict) and api_error.get('privacyStatus'))
+                        # Only count as consecutive error if NOT "Video not found"
+                        is_not_found = 'not found' in error_msg.lower()
                         if is_not_found:
                             videos_not_found += 1
                             consecutive_api_errors = 0
@@ -674,6 +669,7 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                 'description': video_payload.get('description'),
                 'thumbnail_url': video_payload.get('thumbnail_url'),
                 'channel_id': channel_id,
+                'privacy_status': video_payload.get('privacy_status'),
                 'statistics': video_payload.get('statistics'),
                 'topicDetails': video_payload.get('topicDetails'),
                 'video_data_extracted_at': video_payload.get('_extracted_at'),
@@ -1034,6 +1030,7 @@ def enrich_single_video(video_id: str, output_path: Optional[Path], api_key: str
             'description': video_metadata.get('description'),
             'thumbnail_url': video_metadata.get('thumbnail_url'),
             'channel_id': video_metadata.get('channel_id'),
+            'privacy_status': video_metadata.get('privacy_status'),
             'statistics': video_metadata.get('statistics'),
             'topicDetails': video_metadata.get('topicDetails'),
             'metadata_extracted_at': video_metadata.get('_extracted_at'),
