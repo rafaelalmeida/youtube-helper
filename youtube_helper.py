@@ -8,6 +8,7 @@ across multiple playlists accumulated over the years.
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
 import os
@@ -162,6 +163,30 @@ def setup_argparse() -> argparse.ArgumentParser:
     config_subparsers.add_parser(
         "clear-api-key",
         help="Remove stored API key",
+    )
+    
+    # Compare command - compare enriched output with original playlist
+    compare_parser = subparsers.add_parser(
+        "compare",
+        help="Compare enriched JSON output with original playlist CSV",
+    )
+    compare_parser.add_argument(
+        "-p", "--playlist",
+        type=str,
+        required=True,
+        help="Original playlist CSV file from Google Takeout",
+    )
+    compare_parser.add_argument(
+        "-e", "--enriched",
+        type=str,
+        required=True,
+        help="Enriched JSON output file",
+    )
+    compare_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        required=True,
+        help="Output JSON file for comparison report",
     )
     
     return parser
@@ -849,6 +874,128 @@ def display_cache_info(verbose: bool = False):
     print("=" * 60)
 
 
+def compare_enriched_with_playlist(playlist_path: Path, enriched_path: Path, output_path: Path):
+    """
+    Compare enriched JSON output with original playlist CSV.
+    
+    Args:
+        playlist_path: Path to original playlist CSV from Google Takeout
+        enriched_path: Path to enriched JSON output file
+        output_path: Path to output JSON comparison report
+    """
+    # Get playlist file metadata
+    playlist_stat = os.stat(playlist_path)
+    playlist_size = playlist_stat.st_size
+    playlist_created_at = datetime.fromtimestamp(playlist_stat.st_birthtime, tz=timezone.utc).isoformat()
+    playlist_modified_at = datetime.fromtimestamp(playlist_stat.st_mtime, tz=timezone.utc).isoformat()
+    
+    # Calculate playlist checksum (SHA256)
+    sha256 = hashlib.sha256()
+    with open(playlist_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            sha256.update(chunk)
+    playlist_checksum = sha256.hexdigest()
+    
+    # Parse playlist CSV
+    playlist_videos = parse_takeout_csv(playlist_path)
+    playlist_video_ids = {v['video_id'] for v in playlist_videos}
+    
+    # Load enriched JSON
+    with open(enriched_path, 'r', encoding='utf-8') as f:
+        enriched_data = json.load(f)
+    
+    enriched_videos = enriched_data.get('videos', [])
+    enriched_video_ids = {v['video_id'] for v in enriched_videos if 'video_id' in v}
+    
+    # Analyze errors
+    errors_by_type: dict[str, list] = {}
+    videos_without_errors = 0
+    for video in enriched_videos:
+        if 'error' in video:
+            video_id = video['video_id']
+            error_msg = video['error']
+            if error_msg not in errors_by_type:
+                errors_by_type[error_msg] = []
+            errors_by_type[error_msg].append({
+                'video_id': video_id,
+                'url': f'https://www.youtube.com/watch?v={video_id}',
+                'error': error_msg,
+                'added_at': video.get('added_at'),
+            })
+        else:
+            videos_without_errors += 1
+    
+    # Build report
+    report = {
+        'metadata': {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'playlist_file': str(playlist_path),
+            'playlist_size_bytes': playlist_size,
+            'playlist_checksum_sha256': playlist_checksum,
+            'playlist_created_at': playlist_created_at,
+            'playlist_modified_at': playlist_modified_at,
+            'enriched_file': str(enriched_path),
+        },
+        'summary': {
+            'playlist_total': len(playlist_video_ids),
+            'enriched_total': len(enriched_video_ids),
+            'enriched_without_errors': videos_without_errors,
+            'success_rate': round(len(enriched_video_ids) / len(playlist_video_ids) * 100, 1),
+            'errors_total': sum(len(v) for v in errors_by_type.values()),
+        },
+        'errors_by_type': {},
+    }
+    
+    # Populate errors by type with all videos
+    for error_type, videos in sorted(errors_by_type.items(), key=lambda x: len(x[1]), reverse=True):
+        report['errors_by_type'][error_type] = {
+            'count': len(videos),
+            'videos': sorted(videos, key=lambda v: v['video_id']),
+        }
+    
+    # Write report to JSON
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    
+    # Print summary to stdout
+    print()
+    print("=" * 70)
+    print("Enrichment Comparison Report")
+    print("=" * 70)
+    print()
+    
+    print("Playlist File Info:")
+    print(f"  Size: {playlist_size:,} bytes")
+    print(f"  SHA256: {playlist_checksum}")
+    print(f"  Created: {playlist_created_at}")
+    print(f"  Modified: {playlist_modified_at}")
+    print()
+    
+    print("Summary:")
+    print(f"  Playlist total: {report['summary']['playlist_total']} videos")
+    print(f"  Enriched total: {report['summary']['enriched_total']} videos")
+    print(f"  Enriched without errors: {report['summary']['enriched_without_errors']} videos")
+    print(f"  Success rate: {report['summary']['success_rate']}%")
+    print()
+    
+    if report['errors_by_type']:
+        print(f"Errors ({report['summary']['errors_total']} total):")
+        print()
+        
+        for error_type, error_data in report['errors_by_type'].items():
+            print(f"  {error_type}: {error_data['count']} videos")
+        
+        print()
+    else:
+        print("✓ No errors - all videos enriched successfully!")
+        print()
+    
+    print(f"Full report saved to: {output_path}")
+    print("=" * 70)
+    print()
+
+
+
 def main():
     """Main entry point for the CLI."""
     parser = setup_argparse()
@@ -930,6 +1077,13 @@ def main():
                 # No subaction specified, show help
                 parser.parse_args(["config", "-h"])
                 return 0
+        
+        elif args.command == "compare":
+            playlist_path = validate_input_file(args.playlist)
+            enriched_path = validate_input_file(args.enriched)
+            output_path = Path(args.output)
+            compare_enriched_with_playlist(playlist_path, enriched_path, output_path)
+            return 0
         
         return 0
     
