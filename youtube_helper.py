@@ -110,6 +110,19 @@ def setup_argparse() -> argparse.ArgumentParser:
         help="Clear all cached data",
     )
     
+    # Cache inspect subcommand
+    inspect_parser = cache_subparsers.add_parser(
+        "inspect",
+        help="Inspect cached data for a video or channel",
+    )
+    inspect_subparsers = inspect_parser.add_subparsers(dest="inspect_type", help="Inspect type")
+    
+    video_inspect = inspect_subparsers.add_parser("video", help="Inspect cached video")
+    video_inspect.add_argument("video_id", help="YouTube video ID")
+    
+    channel_inspect = inspect_subparsers.add_parser("channel", help="Inspect cached channel")
+    channel_inspect.add_argument("channel_id", help="YouTube channel ID")
+    
     # Enrich command - fetch metadata for Google Takeout playlist export
     enrich_parser = subparsers.add_parser(
         "enrich",
@@ -187,6 +200,49 @@ def setup_argparse() -> argparse.ArgumentParser:
         type=str,
         required=True,
         help="Output JSON file for comparison report",
+    )
+    
+    # Enrich-video command - enrich a single video by ID
+    enrich_video_parser = subparsers.add_parser(
+        "enrich-video",
+        help="Enrich a single video by ID",
+    )
+    enrich_video_parser.add_argument(
+        "video_id",
+        type=str,
+        help="YouTube video ID",
+    )
+    enrich_video_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        help="Output JSON file for video metadata (if omitted, prints to stdout)",
+    )
+    enrich_video_parser.add_argument(
+        "--api-key",
+        type=str,
+        help="YouTube Data API key (or set YOUTUBE_API_KEY env var)",
+    )
+    
+    # Debug command - debug raw API responses
+    debug_parser = subparsers.add_parser(
+        "debug",
+        help="Debug raw API responses",
+    )
+    debug_subparsers = debug_parser.add_subparsers(dest="debug_action", help="Debug actions")
+    
+    debug_video_parser = debug_subparsers.add_parser(
+        "video",
+        help="Debug video info API call",
+    )
+    debug_video_parser.add_argument(
+        "video_id",
+        type=str,
+        help="YouTube video ID",
+    )
+    debug_video_parser.add_argument(
+        "--api-key",
+        type=str,
+        help="YouTube Data API key (or set YOUTUBE_API_KEY env var)",
     )
     
     return parser
@@ -796,6 +852,228 @@ def purge_cache() -> None:
     print(f"✓ Cache purged")
 
 
+def inspect_cache_video(video_id: str):
+    """
+    Inspect and display cached video metadata.
+    
+    Args:
+        video_id: YouTube video ID
+    """
+    with Cache() as cache:
+        video_data = cache.get_video(video_id)
+    
+    if not video_data:
+        print(f"Video {video_id} not found in cache")
+        return
+    
+    print()
+    print("=" * 70)
+    print(f"Cached Video: {video_id}")
+    print("=" * 70)
+    print()
+    print(json.dumps(video_data, indent=2, ensure_ascii=False))
+    print()
+    print("=" * 70)
+    print()
+
+
+def inspect_cache_channel(channel_id: str):
+    """
+    Inspect and display cached channel metadata.
+    
+    Args:
+        channel_id: YouTube channel ID
+    """
+    with Cache() as cache:
+        channel_data = cache.get_channel(channel_id)
+    
+    if not channel_data:
+        print(f"Channel {channel_id} not found in cache")
+        return
+    
+    print()
+    print("=" * 70)
+    print(f"Cached Channel: {channel_id}")
+    print("=" * 70)
+    print()
+    print(json.dumps(channel_data, indent=2, ensure_ascii=False))
+    print()
+    print("=" * 70)
+    print()
+
+
+def debug_video_api_call(video_id: str, api_key: str):
+    """
+    Debug: Print raw YouTube Data API v3 response for a video.
+    
+    Args:
+        video_id: YouTube video ID
+        api_key: YouTube Data API key
+    """
+    url = f"{YOUTUBE_API_BASE}/videos"
+    params = {
+        'part': 'snippet,statistics,topicDetails,status',
+        'id': video_id,
+        'key': api_key,
+    }
+    
+    print()
+    print("=" * 70)
+    print(f"Debug: Video API Call")
+    print("=" * 70)
+    print()
+    print(f"URL: {url}")
+    print(f"Params:")
+    for key, value in params.items():
+        if key == 'key':
+            print(f"  {key}: {value[:10]}...{value[-10:]}")
+        else:
+            print(f"  {key}: {value}")
+    print()
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        print(f"Status Code: {response.status_code}")
+        print()
+        print("Response Headers:")
+        for key, value in response.headers.items():
+            print(f"  {key}: {value}")
+        print()
+        print("Response Body:")
+        try:
+            data = response.json()
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+        except Exception as e:
+            print(f"Could not parse JSON: {e}")
+            print(response.text)
+    except requests.RequestException as e:
+        print(f"Request Error: {e}")
+    
+    print()
+    print("=" * 70)
+    print()
+
+
+def enrich_single_video(video_id: str, output_path: Optional[Path], api_key: str):
+    """
+    Enrich a single video by ID and output metadata to JSON or stdout.
+    
+    Args:
+        video_id: YouTube video ID
+        output_path: Path to output JSON file (or None to print to stdout)
+        api_key: YouTube Data API key
+    """
+    with Cache() as cache:
+        # Check cache first
+        cached_video = cache.get_video(video_id)
+        if cached_video:
+            video_metadata = cached_video.copy()
+            source = "cache"
+        else:
+            # Fetch from API
+            video_metadata, api_error = fetch_video_metadata(video_id, api_key)
+            if api_error:
+                error_msg = api_error.get('message', 'API error') if isinstance(api_error, dict) else str(api_error)
+                output = {
+                    'video_id': video_id,
+                    'url': f'https://www.youtube.com/watch?v={video_id}',
+                    'error': error_msg,
+                    'error_details': api_error if isinstance(api_error, dict) else None,
+                }
+                if output_path:
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        json.dump(output, f, indent=2, ensure_ascii=False)
+                    print(f"✗ Video enrichment failed: {error_msg}")
+                    print(f"  Output: {output_path}")
+                else:
+                    print(json.dumps(output, indent=2, ensure_ascii=False))
+                return
+            
+            if not video_metadata:
+                output = {
+                    'video_id': video_id,
+                    'url': f'https://www.youtube.com/watch?v={video_id}',
+                    'error': 'Video not found',
+                }
+                if output_path:
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        json.dump(output, f, indent=2, ensure_ascii=False)
+                    print(f"✗ Video not found: {video_id}")
+                    print(f"  Output: {output_path}")
+                else:
+                    print(json.dumps(output, indent=2, ensure_ascii=False))
+                return
+            
+            # Cache the video
+            video_metadata['_extracted_at'] = datetime.now(timezone.utc).isoformat()
+            cache.put_video(video_id, video_metadata)
+            source = "api"
+        
+        # Fetch channel data if available
+        channel_id = video_metadata.get('channel_id')
+        channel_metadata = None
+        channel_source = None
+        if channel_id:
+            cached_channel = cache.get_channel(channel_id)
+            if cached_channel:
+                channel_metadata = cached_channel.copy()
+                channel_source = "cache"
+            else:
+                channel_metadata = fetch_channel_metadata(channel_id, api_key)
+                if channel_metadata:
+                    channel_metadata['_extracted_at'] = datetime.now(timezone.utc).isoformat()
+                    cache.put_channel(channel_id, channel_metadata)
+                    channel_source = "api"
+    
+    # Build output
+    output = {
+        'video': {
+            'video_id': video_id,
+            'url': f'https://www.youtube.com/watch?v={video_id}',
+            'title': video_metadata.get('title'),
+            'description': video_metadata.get('description'),
+            'thumbnail_url': video_metadata.get('thumbnail_url'),
+            'channel_id': video_metadata.get('channel_id'),
+            'statistics': video_metadata.get('statistics'),
+            'topicDetails': video_metadata.get('topicDetails'),
+            'metadata_extracted_at': video_metadata.get('_extracted_at'),
+            'source': source,
+        },
+    }
+    
+    if channel_metadata:
+        output['channel'] = {
+            'channel_id': channel_metadata.get('id'),
+            'url': channel_metadata.get('url'),
+            'title': channel_metadata.get('title'),
+            'description': channel_metadata.get('description'),
+            'thumbnail_url': channel_metadata.get('thumbnail_url'),
+            'subscriber_count': channel_metadata.get('subscriber_count'),
+            'country': channel_metadata.get('country'),
+            'topicIds': channel_metadata.get('topicIds', []),
+            'topicCategories': channel_metadata.get('topicCategories', []),
+            'metadata_extracted_at': channel_metadata.get('_extracted_at'),
+            'source': channel_source if channel_source else 'unknown',
+        }
+    
+    # Write output or print to stdout
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(output, f, indent=2, ensure_ascii=False)
+        
+        # Summary
+        print(f"✓ Video enriched successfully")
+        print(f"  Video ID: {video_id}")
+        print(f"  Video source: {source}")
+        if channel_metadata:
+            print(f"  Channel: {channel_metadata.get('title')} ({channel_id})")
+            print(f"  Channel source: {channel_source if channel_source else 'unknown'}")
+        print(f"  Output: {output_path}")
+    else:
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+
+
+
 def display_cache_info(verbose: bool = False):
     """
     Display cache file information and statistics.
@@ -1022,6 +1300,17 @@ def main():
             elif args.cache_action == "purge":
                 purge_cache()
                 return 0
+            elif args.cache_action == "inspect":
+                if args.inspect_type == "video":
+                    inspect_cache_video(args.video_id)
+                    return 0
+                elif args.inspect_type == "channel":
+                    inspect_cache_channel(args.channel_id)
+                    return 0
+                else:
+                    # No inspect type specified, show help
+                    parser.parse_args(["cache", "inspect", "-h"])
+                    return 0
             else:
                 # No subaction specified, show help
                 parser.parse_args(["cache", "-h"])
@@ -1084,6 +1373,32 @@ def main():
             output_path = Path(args.output)
             compare_enriched_with_playlist(playlist_path, enriched_path, output_path)
             return 0
+        
+        elif args.command == "enrich-video":
+            # Get API key from multiple sources
+            api_key = get_api_key(args.api_key)
+            if not api_key:
+                print(f"Error: YouTube API key required. Use --api-key, set {YOUTUBE_API_KEY_ENV_VAR} env var, or run 'config set-api-key'.", file=sys.stderr)
+                return 1
+            
+            video_id = args.video_id
+            output_path = Path(args.output) if args.output else None
+            enrich_single_video(video_id, output_path, api_key)
+            return 0
+        
+        elif args.command == "debug":
+            if args.debug_action == "video":
+                api_key = get_api_key(args.api_key)
+                if not api_key:
+                    print(f"Error: YouTube API key required. Use --api-key, set {YOUTUBE_API_KEY_ENV_VAR} env var, or run 'config set-api-key'.", file=sys.stderr)
+                    return 1
+                
+                debug_video_api_call(args.video_id, api_key)
+                return 0
+            else:
+                # No debug action specified, show help
+                parser.parse_args(["debug", "-h"])
+                return 0
         
         return 0
     
