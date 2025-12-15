@@ -9,6 +9,7 @@ across multiple playlists accumulated over the years.
 import argparse
 import csv
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -23,6 +24,40 @@ from cache import Cache
 # YouTube Data API v3 configuration
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 YOUTUBE_API_KEY_ENV_VAR = "YOUTUBE_API_KEY"
+ERROR_LOG_PATH = Path.home() / "Library/Logs/youtube-helper/error.log"
+
+
+def write_error_to_log(video_id: str, error_msg: str, error_details: Optional[dict] = None, error_obj: Optional[Exception] = None) -> None:
+    """
+    Write a single error to error log file immediately.
+    
+    Args:
+        video_id: YouTube video ID
+        error_msg: Error message
+        error_details: Dict with status_code, error_code, message from API
+        error_obj: Exception object for additional details
+    """
+    try:
+        # Create directory if needed
+        ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now(timezone.utc).isoformat()
+        
+        with open(ERROR_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] Video ID: {video_id} | Error: {error_msg}")
+            
+            # Log error_details as single-line JSON if available
+            if error_details:
+                f.write(f" | Details: {json.dumps(error_details, separators=(',', ':'))}")
+            
+            # Log exception type if available
+            if error_obj:
+                f.write(f" | Exception: {type(error_obj).__name__}")
+            
+            f.write("\n")
+            f.flush()
+    except Exception as e:
+        print(f"Warning: Could not write to error log: {e}", file=sys.stderr)
 
 
 def setup_argparse() -> argparse.ArgumentParser:
@@ -208,7 +243,7 @@ def parse_takeout_csv(input_path: Path) -> list[dict]:
     return videos
 
 
-def fetch_video_metadata(video_id: str, api_key: str) -> Optional[dict]:
+def fetch_video_metadata(video_id: str, api_key: str) -> tuple[Optional[dict], Optional[dict]]:
     """
     Fetch video metadata from YouTube Data API v3.
     
@@ -217,27 +252,57 @@ def fetch_video_metadata(video_id: str, api_key: str) -> Optional[dict]:
         api_key: YouTube Data API key
         
     Returns:
-        Dict with video metadata or None if not found
+        Tuple of (video metadata dict or None, error details dict or None)
     """
     url = f"{YOUTUBE_API_BASE}/videos"
     params = {
-        'part': 'snippet,statistics,topicDetails',
+        'part': 'snippet,statistics,topicDetails,status',
         'id': video_id,
         'key': api_key,
     }
     
-    response = requests.get(url, params=params)
-    response.raise_for_status()
+    response = requests.get(url, params=params, timeout=10)
+    status_code = response.status_code
     
-    data = response.json()
+    try:
+        data = response.json()
+    except Exception:
+        data = {}
+    
+    # Check for API errors in response body
+    if 'error' in data:
+        error_info = data['error']
+        return None, {
+            'status_code': status_code,
+            'error_code': error_info.get('code'),
+            'message': error_info.get('message'),
+            'errors': error_info.get('errors', []),
+        }
+    
+    # Check HTTP status
+    if not response.ok:
+        return None, {
+            'status_code': status_code,
+            'message': response.text[:200],
+        }
     
     if not data.get('items'):
-        return None
+        return None, {'status_code': status_code, 'message': 'Video not found'}
     
     item = data['items'][0]
     snippet = item.get('snippet', {})
     statistics = item.get('statistics', {})
     topic_details = item.get('topicDetails', {})
+    status_info = item.get('status', {})
+    
+    # Check privacy status
+    privacy_status = status_info.get('privacyStatus')
+    if privacy_status in ('private', 'unlisted'):
+        return None, {
+            'status_code': status_code,
+            'message': f'Video is {privacy_status}',
+            'privacyStatus': privacy_status,
+        }
     
     # Extract default thumbnail URL
     thumbnails = snippet.get('thumbnails', {})
@@ -260,7 +325,7 @@ def fetch_video_metadata(video_id: str, api_key: str) -> Optional[dict]:
             'relevantTopicIds': topic_details.get('relevantTopicIds', []),
             'topicCategories': topic_details.get('topicCategories', []),
         },
-    }
+    }, None
 
 
 def fetch_channel_metadata(channel_id: str, api_key: str) -> Optional[dict]:
@@ -281,7 +346,7 @@ def fetch_channel_metadata(channel_id: str, api_key: str) -> Optional[dict]:
         'key': api_key,
     }
     
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=10)
     response.raise_for_status()
     
     data = response.json()
@@ -336,6 +401,8 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
     api_success = 0
     api_errors = 0
     consecutive_api_errors = 0
+    videos_not_found = 0
+    processing_errors = 0
     errors = []
     aborted = False
     
@@ -357,23 +424,59 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                 video_payload = cached_video.copy()
             else:
                 try:
-                    video_metadata = fetch_video_metadata(video_id, api_key)
+                    video_metadata, api_error = fetch_video_metadata(video_id, api_key)
                     api_calls += 1
 
-                    if not video_metadata:
+                    if api_error:
                         api_errors += 1
-                        consecutive_api_errors += 1
-                        progress.set_postfix(success=api_success, errors=api_errors)
-                        errors.append({'video_id': video_id, 'error': 'Video not found (may be deleted or private)'})
-                        enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': 'Video not found'})
+                        error_msg = api_error.get('message', 'API error') if isinstance(api_error, dict) else str(api_error)
+                        errors.append({'video_id': video_id, 'error': error_msg})
+                        write_error_to_log(video_id, error_msg, error_details=api_error if isinstance(api_error, dict) else None)
+                        enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': error_msg})
+                        
+                        # Only count as consecutive error if NOT "Video not found" or privacy issue
+                        is_not_found = 'not found' in error_msg.lower() or (isinstance(api_error, dict) and api_error.get('privacyStatus'))
+                        if is_not_found:
+                            videos_not_found += 1
+                            consecutive_api_errors = 0
+                        else:
+                            consecutive_api_errors += 1
+                        
+                        progress.set_postfix({
+                            'cached': video_cache_hits,
+                            'fetched': api_success,
+                            'not_found': videos_not_found,
+                            'errors': processing_errors,
+                        })
                         if consecutive_api_errors >= 10:
                             aborted = True
                             break
                         continue
 
+                    if not video_metadata:
+                        api_errors += 1
+                        videos_not_found += 1
+                        error_msg = 'Video not found (may be deleted or private)'
+                        errors.append({'video_id': video_id, 'error': error_msg})
+                        write_error_to_log(video_id, error_msg)
+                        enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': 'Video not found'})
+                        progress.set_postfix({
+                            'cached': video_cache_hits,
+                            'fetched': api_success,
+                            'not_found': videos_not_found,
+                            'errors': processing_errors,
+                        })
+                        consecutive_api_errors = 0
+                        continue
+
                     api_success += 1
                     consecutive_api_errors = 0
-                    progress.set_postfix(success=api_success, errors=api_errors)
+                    progress.set_postfix({
+                        'cached': video_cache_hits,
+                        'fetched': api_success,
+                        'not_found': videos_not_found,
+                        'errors': processing_errors,
+                    })
 
                     video_extracted_at = datetime.now(timezone.utc).isoformat()
                     video_metadata['_extracted_at'] = video_extracted_at
@@ -382,12 +485,36 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                 except requests.RequestException as e:
                     api_errors += 1
                     consecutive_api_errors += 1
-                    progress.set_postfix(success=api_success, errors=api_errors)
-                    errors.append({'video_id': video_id, 'error': str(e)})
+                    processing_errors += 1
+                    error_msg = str(e)
+                    errors.append({'video_id': video_id, 'error': error_msg})
+                    write_error_to_log(video_id, error_msg, error_obj=e)
                     enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': str(e)})
+                    progress.set_postfix({
+                        'cached': video_cache_hits,
+                        'fetched': api_success,
+                        'not_found': videos_not_found,
+                        'errors': processing_errors,
+                    })
                     if consecutive_api_errors >= 10:
                         aborted = True
                         break
+                    continue
+                except Exception as e:
+                    # Catch unexpected errors (like the 'str' object has no attribute 'get' error)
+                    api_errors += 1
+                    processing_errors += 1
+                    error_msg = f"Processing error: {str(e)}"
+                    errors.append({'video_id': video_id, 'error': error_msg})
+                    write_error_to_log(video_id, error_msg, error_obj=e)
+                    enriched_videos.append({'video_id': video_id, 'added_at': added_at, 'error': error_msg})
+                    progress.set_postfix({
+                        'cached': video_cache_hits,
+                        'fetched': api_success,
+                        'not_found': videos_not_found,
+                        'errors': processing_errors,
+                    })
+                    consecutive_api_errors = 0  # Don't count unexpected errors toward abort threshold
                     continue
 
             channel_id = video_payload.get('channel_id')
@@ -409,7 +536,12 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                             if channel_metadata:
                                 api_success += 1
                                 consecutive_api_errors = 0
-                                progress.set_postfix(success=api_success, errors=api_errors)
+                                progress.set_postfix({
+                                    'cached': video_cache_hits,
+                                    'fetched': api_success,
+                                    'not_found': videos_not_found,
+                                    'errors': processing_errors,
+                                })
                                 channel_extracted_at = datetime.now(timezone.utc).isoformat()
                                 channel_metadata['_extracted_at'] = channel_extracted_at
                                 cache.put_channel(channel_id, channel_metadata)
@@ -417,12 +549,34 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
                             else:
                                 api_errors += 1
                                 consecutive_api_errors += 1
-                                progress.set_postfix(success=api_success, errors=api_errors)
+                                progress.set_postfix({
+                                    'cached': video_cache_hits,
+                                    'fetched': api_success,
+                                    'not_found': videos_not_found,
+                                    'errors': processing_errors,
+                                })
                                 channel_data = None
                         except requests.RequestException:
                             api_errors += 1
                             consecutive_api_errors += 1
-                            progress.set_postfix(success=api_success, errors=api_errors)
+                            processing_errors += 1
+                            progress.set_postfix({
+                                'cached': video_cache_hits,
+                                'fetched': api_success,
+                                'not_found': videos_not_found,
+                                'errors': processing_errors,
+                            })
+                            channel_data = None
+                        except Exception as e:
+                            api_errors += 1
+                            processing_errors += 1
+                            write_error_to_log(channel_id, f"Channel processing error: {str(e)}", error_obj=e)
+                            progress.set_postfix({
+                                'cached': video_cache_hits,
+                                'fetched': api_success,
+                                'not_found': videos_not_found,
+                                'errors': processing_errors,
+                            })
                             channel_data = None
 
                         if consecutive_api_errors >= 10:
@@ -494,11 +648,15 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
     
     # Summary
     print(f"\n✓ Enriched {len(enriched_videos)} videos")
-    print(f"  Video cache hits: {video_cache_hits}")
-    print(f"  Channel cache hits: {channel_cache_hits}")
-    print(f"  API calls: {api_calls}")
+    print(f"  Videos from cache: {video_cache_hits}")
+    print(f"  Videos fetched: {api_success}")
+    print(f"  Videos not found: {videos_not_found}")
+    print(f"  Processing errors: {processing_errors}")
+    print(f"  Channels from cache: {channel_cache_hits}")
+    print(f"  Total API calls: {api_calls}")
     if errors:
-        print(f"  Errors: {len(errors)}")
+        print(f"  Errors logged: {len(errors)}")
+        print(f"  Error log: {ERROR_LOG_PATH}")
     print(f"  Output: {output_path}")
 
 
