@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from tqdm import tqdm
 
 from cache import Cache
@@ -243,6 +244,34 @@ def setup_argparse() -> argparse.ArgumentParser:
         "--api-key",
         type=str,
         help="YouTube Data API key (or set YOUTUBE_API_KEY env var)",
+    )
+    
+    # Render command - render enriched JSON to HTML
+    render_parser = subparsers.add_parser(
+        "render",
+        help="Render enriched JSON playlist data to HTML page",
+    )
+    render_parser.add_argument(
+        "-i", "--input",
+        type=str,
+        required=True,
+        help="Input JSON file with enriched playlist data",
+    )
+    render_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        required=True,
+        help="Output HTML file",
+    )
+    render_parser.add_argument(
+        "-t", "--title",
+        type=str,
+        help="Page title (default: 'YouTube Playlist')",
+    )
+    render_parser.add_argument(
+        "--template",
+        type=str,
+        help="Custom Jinja2 template file (default: built-in playlist.html)",
     )
     
     return parser
@@ -1149,6 +1178,71 @@ def display_cache_info(verbose: bool = False):
     print("=" * 60)
 
 
+def format_number(value: int) -> str:
+    """Format a number with commas for thousands separator."""
+    try:
+        return f"{int(value):,}"
+    except (ValueError, TypeError):
+        return str(value)
+
+
+def render_playlist_to_html(
+    input_path: Path,
+    output_path: Path,
+    title: Optional[str] = None,
+    template_path: Optional[Path] = None,
+):
+    """
+    Render enriched playlist JSON to an HTML page.
+    
+    Args:
+        input_path: Path to enriched JSON file
+        output_path: Path to output HTML file
+        title: Page title (optional)
+        template_path: Path to custom Jinja2 template (optional)
+    """
+    # Load enriched data
+    with open(input_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    videos = data.get('videos', [])
+    channels = data.get('channels', {})
+    metadata = data.get('metadata', {})
+    
+    # Setup Jinja2 environment
+    if template_path:
+        template_dir = template_path.parent
+        template_name = template_path.name
+    else:
+        # Use built-in template
+        template_dir = Path(__file__).parent / 'templates'
+        template_name = 'playlist.html'
+    
+    env = Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(['html', 'xml'])
+    )
+    
+    # Add custom filter for number formatting
+    env.filters['format_number'] = format_number
+    
+    template = env.get_template(template_name)
+    
+    # Render template
+    html_content = template.render(
+        title=title or 'YouTube Playlist',
+        videos=videos,
+        channels=channels,
+        metadata=metadata,
+    )
+    
+    # Write output
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    print(f"✓ Rendered {len(videos)} videos to {output_path}")
+
+
 def compare_enriched_with_playlist(playlist_path: Path, enriched_path: Path, output_path: Path):
     """
     Compare enriched JSON output with original playlist CSV.
@@ -1396,6 +1490,13 @@ def main():
                 # No debug action specified, show help
                 parser.parse_args(["debug", "-h"])
                 return 0
+        
+        elif args.command == "render":
+            input_path = validate_input_file(args.input)
+            output_path = Path(args.output)
+            template_path = Path(args.template) if args.template else None
+            render_playlist_to_html(input_path, output_path, args.title, template_path)
+            return 0
         
         return 0
     
