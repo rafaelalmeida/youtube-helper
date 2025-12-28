@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Saved Videos</title>
+    <style>
+        :root {
+            --bg-primary: #0f0f0f;
+            --bg-secondary: #272727;
+            --bg-hover: #3f3f3f;
+            --text-primary: #f1f1f1;
+            --text-secondary: #aaaaaa;
+            --text-muted: #717171;
+            --accent: #3ea6ff;
+            --border-color: #3f3f3f;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Roboto', 'Arial', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            padding: 24px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .header .stats {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .video-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .video-item {
+            display: flex;
+            gap: 16px;
+            padding: 12px;
+            border-radius: 12px;
+            background-color: var(--bg-primary);
+            transition: background-color 0.2s ease;
+        }
+
+        .video-item:hover {
+            background-color: var(--bg-secondary);
+        }
+
+        .video-item a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .thumbnail-container {
+            position: relative;
+            flex-shrink: 0;
+            width: 246px;
+            height: 138px;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: var(--bg-secondary);
+        }
+
+        .thumbnail {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .thumbnail-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .duration {
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .video-details {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .video-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+
+        .video-title a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .video-title a:hover {
+            color: var(--accent);
+        }
+
+        .channel-name {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .channel-name a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .channel-name a:hover {
+            color: var(--text-primary);
+        }
+
+        .video-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .video-meta .separator {
+            width: 4px;
+            height: 4px;
+            background-color: var(--text-muted);
+            border-radius: 50%;
+        }
+
+        .video-description {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .video-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .tag {
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background-color: var(--bg-secondary);
+            color: var(--text-secondary);
+        }
+
+        .tag.topic {
+            background-color: #1a3a1a;
+            color: #4ade80;
+        }
+
+        .tag.playlist {
+            background-color: #1a2a3a;
+            color: #60a5fa;
+        }
+
+        .error-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background-color: #3a1a1a;
+            color: #f87171;
+            font-size: 12px;
+            border-radius: 4px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s ease;
+        }
+
+        .filter-btn:hover {
+            background-color: var(--bg-hover);
+        }
+
+        .filter-btn.active {
+            background-color: var(--text-primary);
+            color: var(--bg-primary);
+        }
+
+        .search-box {
+            margin-bottom: 20px;
+        }
+
+        .search-input {
+            width: 100%;
+            max-width: 400px;
+            padding: 10px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        @media (max-width: 768px) {
+            .video-item {
+                flex-direction: column;
+            }
+
+            .thumbnail-container {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 16 / 9;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>My Saved Videos</h1>
+            <p class="stats">
+                8 videos
+                
+                • Enriched 2025-12-21
+                
+            </p>
+        </header>
+
+        <div class="search-box">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search videos...">
+        </div>
+
+        <div class="video-list" id="videoList">
+            
+            <article class="video-item" data-title="build a rest api with python and flask in 10 minutes" data-channel="fireship" data-description="in this tutorial, you&#39;ll learn how to build a rest api from scratch using python and flask. we&#39;ll cover routing, request handling, json responses, error handling, and best practices for api design. by the end, you&#39;ll have a fully functional api ready for deployment.">
+                <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" alt="Build a REST API with Python and Flask in 10 Minutes" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" rel="noopener">
+                            
+                                Build a REST API with Python and Flask in 10 Minutes
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UCVHFbqXqoYvEWM1Ddxl0QKg" target="_blank" rel="noopener">
+                            Fireship
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>1,543,892 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-14</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">In this tutorial, you&#39;ll learn how to build a REST API from scratch using Python and Flask. We&#39;ll co...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Technology</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Saved for later</span>
+                            
+                            <span class="tag playlist">Watch later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="the transformer architecture explained" data-channel="3blue1brown" data-description="a deep dive into the transformer architecture that powers modern ai models like gpt-4 and claude. we explore attention mechanisms, positional encoding, and why transformers have revolutionized natural language processing.">
+                <a href="https://www.youtube.com/watch?v=xvFZjo5PgG0" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/xvFZjo5PgG0/hqdefault.jpg" alt="The Transformer Architecture Explained" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=xvFZjo5PgG0" target="_blank" rel="noopener">
+                            
+                                The Transformer Architecture Explained
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UCWX3yJDEoJk86ruJBM7YXbA" target="_blank" rel="noopener">
+                            3Blue1Brown
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>892,341 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-13</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">A deep dive into the transformer architecture that powers modern AI models like GPT-4 and Claude. We...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Machine learning</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Watch later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="what is webassembly? 100 seconds" data-channel="fireship" data-description="webassembly is a binary instruction format that allows you to run code written in multiple languages on the web at near-native speed. learn the basics in 100 seconds.">
+                <a href="https://www.youtube.com/watch?v=abc123xyz" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/abc123xyz/hqdefault.jpg" alt="What is WebAssembly? 100 Seconds" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=abc123xyz" target="_blank" rel="noopener">
+                            
+                                What is WebAssembly? 100 Seconds
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UCVHFbqXqoYvEWM1Ddxl0QKg" target="_blank" rel="noopener">
+                            Fireship
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>2,156,789 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-12</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">WebAssembly is a binary instruction format that allows you to run code written in multiple languages...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Technology</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Saved for later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="how computers generate random numbers" data-channel="computerphile" data-description="professor david brailsford explains the fascinating world of pseudo-random number generation and why true randomness is so hard to achieve in computing.">
+                <a href="https://www.youtube.com/watch?v=def456uvw" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/def456uvw/hqdefault.jpg" alt="How Computers Generate Random Numbers" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=def456uvw" target="_blank" rel="noopener">
+                            
+                                How Computers Generate Random Numbers
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UCsBjURrPoezykLs9EqgamOA" target="_blank" rel="noopener">
+                            Computerphile
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>567,234 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-11</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">Professor David Brailsford explains the fascinating world of pseudo-random number generation and why...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Science</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Watch later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="full stack web development course - 12 hours" data-channel="freecodecamp.org" data-description="learn full stack web development from scratch. this comprehensive course covers html, css, javascript, node.js, express, mongodb, and react. perfect for beginners who want to become professional web developers.">
+                <a href="https://www.youtube.com/watch?v=ghi789rst" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/ghi789rst/hqdefault.jpg" alt="Full Stack Web Development Course - 12 Hours" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=ghi789rst" target="_blank" rel="noopener">
+                            
+                                Full Stack Web Development Course - 12 Hours
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UC8butISFwT-Wl7EV0hUK0BQ" target="_blank" rel="noopener">
+                            freeCodeCamp.org
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>4,532,109 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-10</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">Learn full stack web development from scratch. This comprehensive course covers HTML, CSS, JavaScrip...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Education</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Saved for later</span>
+                            
+                            <span class="tag playlist">Watch later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="google i/o 2025 developer keynote" data-channel="google for developers" data-description="watch the full google i/o 2025 developer keynote featuring the latest announcements in android, ai, cloud, and web technologies. discover new tools and apis to build amazing experiences.">
+                <a href="https://www.youtube.com/watch?v=jkl012mno" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/jkl012mno/hqdefault.jpg" alt="Google I/O 2025 Developer Keynote" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=jkl012mno" target="_blank" rel="noopener">
+                            
+                                Google I/O 2025 Developer Keynote
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw" target="_blank" rel="noopener">
+                            Google for Developers
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>987,654 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-09</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">Watch the full Google I/O 2025 developer keynote featuring the latest announcements in Android, AI, ...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Technology</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Saved for later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="linear algebra - full college course" data-channel="freecodecamp.org" data-description="learn linear algebra with this comprehensive university-level course. topics include vectors, matrices, linear transformations, eigenvalues, and more. essential for machine learning and computer graphics.">
+                <a href="https://www.youtube.com/watch?v=pqr345stu" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <img src="https://i.ytimg.com/vi/pqr345stu/hqdefault.jpg" alt="Linear Algebra - Full College Course" class="thumbnail" loading="lazy">
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=pqr345stu" target="_blank" rel="noopener">
+                            
+                                Linear Algebra - Full College Course
+                            
+                        </a>
+                    </h3>
+
+                    
+                    <div class="channel-name">
+                        <a href="https://www.youtube.com/channel/UC8butISFwT-Wl7EV0hUK0BQ" target="_blank" rel="noopener">
+                            freeCodeCamp.org
+                        </a>
+                    </div>
+                    
+
+                    <div class="video-meta">
+                        
+                        <span>2,345,678 views</span>
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-07</span>
+                        
+                    </div>
+
+                    
+                    <p class="video-description">Learn linear algebra with this comprehensive university-level course. Topics include vectors, matric...</p>
+                    
+
+                    <div class="video-tags">
+                        
+                            
+                            <span class="tag topic">Mathematics</span>
+                        
+
+                        
+                            
+                            <span class="tag playlist">Watch later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+            <article class="video-item" data-title="none" data-channel="" data-description="none">
+                <a href="https://www.youtube.com/watch?v=deleted123" target="_blank" rel="noopener" class="thumbnail-container">
+                    
+                    <div class="thumbnail-placeholder">No thumbnail</div>
+                    
+                </a>
+
+                <div class="video-details">
+                    <h3 class="video-title">
+                        <a href="https://www.youtube.com/watch?v=deleted123" target="_blank" rel="noopener">
+                            
+                                <span class="error-badge">Video not found</span> deleted123
+                            
+                        </a>
+                    </h3>
+
+                    
+
+                    <div class="video-meta">
+                        
+                        
+                        <span class="separator"></span>
+                        <span>Added 2025-12-05</span>
+                        
+                    </div>
+
+                    
+
+                    <div class="video-tags">
+                        
+
+                        
+                            
+                            <span class="tag playlist">Saved for later</span>
+                            
+                        
+                    </div>
+                </div>
+            </article>
+            
+        </div>
+    </div>
+
+    <script>
+        // Simple search functionality
+        const searchInput = document.getElementById('searchInput');
+        const videoList = document.getElementById('videoList');
+        const videoItems = videoList.querySelectorAll('.video-item');
+
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            
+            videoItems.forEach(item => {
+                const title = item.dataset.title || '';
+                const channel = item.dataset.channel || '';
+                const description = item.dataset.description || '';
+                
+                const matches = title.includes(query) || 
+                               channel.includes(query) || 
+                               description.includes(query);
+                
+                item.style.display = matches ? 'flex' : 'none';
+            });
+        });
+
+        // Format numbers with commas (fallback for server-side filter)
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+    </script>
+</body>
+</html>

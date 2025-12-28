@@ -1,0 +1,230 @@
+{
+  "metadata": {
+    "source_file": "sample-data/takeout-all-playlists",
+    "total_videos": 8,
+    "total_channels": 5,
+    "enriched_at": "2025-12-21T10:30:00+00:00",
+    "video_cache_hits": 0,
+    "channel_cache_hits": 0,
+    "api_calls": 13,
+    "api_success": 13,
+    "api_errors": 0,
+    "errors": 0
+  },
+  "channels": {
+    "UC_x5XG1OV2P6uZZ5FSM9Ttw": {
+      "id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+      "title": "Google for Developers",
+      "publishedAt": "2007-08-23T00:34:43Z",
+      "channel_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "subscriber_count": "2500000",
+      "url": "https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw",
+      "description": "Subscribe to the Google Developers channel for the latest news, product updates, and more.",
+      "thumbnail_url": "https://yt3.ggpht.com/ytc/AIdro_lGRv8bm1H9SkJ-2Zf8tKdOUM1XjKtL-pxXN0Qr=s88-c-k-c0x00ffffff-no-rj",
+      "country": "US",
+      "topicIds": [],
+      "topicCategories": ["https://en.wikipedia.org/wiki/Technology"]
+    },
+    "UCVHFbqXqoYvEWM1Ddxl0QKg": {
+      "id": "UCVHFbqXqoYvEWM1Ddxl0QKg",
+      "title": "Fireship",
+      "publishedAt": "2017-04-07T18:09:30Z",
+      "channel_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "subscriber_count": "3100000",
+      "url": "https://www.youtube.com/channel/UCVHFbqXqoYvEWM1Ddxl0QKg",
+      "description": "High-intensity code tutorials to help you build & ship your app faster.",
+      "thumbnail_url": "https://yt3.ggpht.com/ytc/AIdro_mKzklyPPhghBJQH5H3HpZ574RvaZ-J9b0KXFA_=s88-c-k-c0x00ffffff-no-rj",
+      "country": "US",
+      "topicIds": [],
+      "topicCategories": ["https://en.wikipedia.org/wiki/Technology"]
+    },
+    "UCsBjURrPoezykLs9EqgamOA": {
+      "id": "UCsBjURrPoezykLs9EqgamOA",
+      "title": "Computerphile",
+      "publishedAt": "2013-02-11T17:33:40Z",
+      "channel_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "subscriber_count": "2400000",
+      "url": "https://www.youtube.com/channel/UCsBjURrPoezykLs9EqgamOA",
+      "description": "Videos all about computers and computer stuff. Sister channel of Numberphile.",
+      "thumbnail_url": "https://yt3.ggpht.com/ytc/AIdro_nI9c-KDQpyGAJ0cFIiN0lyGqvPIKmJ0TyG3g=s88-c-k-c0x00ffffff-no-rj",
+      "country": "GB",
+      "topicIds": [],
+      "topicCategories": ["https://en.wikipedia.org/wiki/Science"]
+    },
+    "UC8butISFwT-Wl7EV0hUK0BQ": {
+      "id": "UC8butISFwT-Wl7EV0hUK0BQ",
+      "title": "freeCodeCamp.org",
+      "publishedAt": "2014-12-16T21:18:48Z",
+      "channel_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "subscriber_count": "9500000",
+      "url": "https://www.youtube.com/channel/UC8butISFwT-Wl7EV0hUK0BQ",
+      "description": "Learn to code for free.",
+      "thumbnail_url": "https://yt3.ggpht.com/ytc/AIdro_lF97QUf0f0I8f2mDiJ8m-t2h4hD2fEJU8cOKL6=s88-c-k-c0x00ffffff-no-rj",
+      "country": "US",
+      "topicIds": [],
+      "topicCategories": ["https://en.wikipedia.org/wiki/Education"]
+    },
+    "UCWX3yJDEoJk86ruJBM7YXbA": {
+      "id": "UCWX3yJDEoJk86ruJBM7YXbA",
+      "title": "3Blue1Brown",
+      "publishedAt": "2015-03-14T00:00:00Z",
+      "channel_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "subscriber_count": "6200000",
+      "url": "https://www.youtube.com/channel/UCWX3yJDEoJk86ruJBM7YXbA",
+      "description": "3Blue1Brown, by Grant Sanderson, is some combination of math and entertainment.",
+      "thumbnail_url": "https://yt3.ggpht.com/ytc/AIdro_lSb5qGZj-gxkPpVj6E_lMWNj5cVzXhKvNPXQ=s88-c-k-c0x00ffffff-no-rj",
+      "country": "US",
+      "topicIds": [],
+      "topicCategories": ["https://en.wikipedia.org/wiki/Mathematics"]
+    }
+  },
+  "videos": [
+    {
+      "video_id": "dQw4w9WgXcQ",
+      "title": "Build a REST API with Python and Flask in 10 Minutes",
+      "description": "In this tutorial, you'll learn how to build a REST API from scratch using Python and Flask. We'll cover routing, request handling, JSON responses, error handling, and best practices for API design. By the end, you'll have a fully functional API ready for deployment.",
+      "thumbnail_url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      "channel_id": "UCVHFbqXqoYvEWM1Ddxl0QKg",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "1543892",
+        "likeCount": "45234",
+        "commentCount": "1234"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Technology", "https://en.wikipedia.org/wiki/Programming"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-14T13:00:12+00:00",
+      "appears_in_playlists": ["Saved for later", "Watch later"]
+    },
+    {
+      "video_id": "xvFZjo5PgG0",
+      "title": "The Transformer Architecture Explained",
+      "description": "A deep dive into the transformer architecture that powers modern AI models like GPT-4 and Claude. We explore attention mechanisms, positional encoding, and why transformers have revolutionized natural language processing.",
+      "thumbnail_url": "https://i.ytimg.com/vi/xvFZjo5PgG0/hqdefault.jpg",
+      "channel_id": "UCWX3yJDEoJk86ruJBM7YXbA",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "892341",
+        "likeCount": "32109",
+        "commentCount": "2341"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Machine_learning"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-13T11:00:49+00:00",
+      "appears_in_playlists": ["Watch later"]
+    },
+    {
+      "video_id": "abc123xyz",
+      "title": "What is WebAssembly? 100 Seconds",
+      "description": "WebAssembly is a binary instruction format that allows you to run code written in multiple languages on the web at near-native speed. Learn the basics in 100 seconds.",
+      "thumbnail_url": "https://i.ytimg.com/vi/abc123xyz/hqdefault.jpg",
+      "channel_id": "UCVHFbqXqoYvEWM1Ddxl0QKg",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "2156789",
+        "likeCount": "87654",
+        "commentCount": "3456"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Technology"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-12T10:24:41+00:00",
+      "appears_in_playlists": ["Saved for later"]
+    },
+    {
+      "video_id": "def456uvw",
+      "title": "How Computers Generate Random Numbers",
+      "description": "Professor David Brailsford explains the fascinating world of pseudo-random number generation and why true randomness is so hard to achieve in computing.",
+      "thumbnail_url": "https://i.ytimg.com/vi/def456uvw/hqdefault.jpg",
+      "channel_id": "UCsBjURrPoezykLs9EqgamOA",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "567234",
+        "likeCount": "21098",
+        "commentCount": "876"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Science"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-11T18:06:34+00:00",
+      "appears_in_playlists": ["Watch later"]
+    },
+    {
+      "video_id": "ghi789rst",
+      "title": "Full Stack Web Development Course - 12 Hours",
+      "description": "Learn full stack web development from scratch. This comprehensive course covers HTML, CSS, JavaScript, Node.js, Express, MongoDB, and React. Perfect for beginners who want to become professional web developers.",
+      "thumbnail_url": "https://i.ytimg.com/vi/ghi789rst/hqdefault.jpg",
+      "channel_id": "UC8butISFwT-Wl7EV0hUK0BQ",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "4532109",
+        "likeCount": "156789",
+        "commentCount": "8765"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Education"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-10T19:13:13+00:00",
+      "appears_in_playlists": ["Saved for later", "Watch later"]
+    },
+    {
+      "video_id": "jkl012mno",
+      "title": "Google I/O 2025 Developer Keynote",
+      "description": "Watch the full Google I/O 2025 developer keynote featuring the latest announcements in Android, AI, Cloud, and Web technologies. Discover new tools and APIs to build amazing experiences.",
+      "thumbnail_url": "https://i.ytimg.com/vi/jkl012mno/hqdefault.jpg",
+      "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "987654",
+        "likeCount": "43210",
+        "commentCount": "5432"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Technology"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-09T20:26:16+00:00",
+      "appears_in_playlists": ["Saved for later"]
+    },
+    {
+      "video_id": "pqr345stu",
+      "title": "Linear Algebra - Full College Course",
+      "description": "Learn linear algebra with this comprehensive university-level course. Topics include vectors, matrices, linear transformations, eigenvalues, and more. Essential for machine learning and computer graphics.",
+      "thumbnail_url": "https://i.ytimg.com/vi/pqr345stu/hqdefault.jpg",
+      "channel_id": "UC8butISFwT-Wl7EV0hUK0BQ",
+      "privacy_status": "public",
+      "statistics": {
+        "viewCount": "2345678",
+        "likeCount": "98765",
+        "commentCount": "4321"
+      },
+      "topicDetails": {
+        "topicCategories": ["https://en.wikipedia.org/wiki/Mathematics"]
+      },
+      "video_data_extracted_at": "2025-12-21T10:30:00+00:00",
+      "added_at": "2025-12-07T15:53:28+00:00",
+      "appears_in_playlists": ["Watch later"]
+    },
+    {
+      "video_id": "deleted123",
+      "title": null,
+      "description": null,
+      "thumbnail_url": null,
+      "channel_id": null,
+      "privacy_status": null,
+      "statistics": null,
+      "topicDetails": null,
+      "video_data_extracted_at": null,
+      "added_at": "2025-12-05T23:02:19+00:00",
+      "error": "Video not found",
+      "appears_in_playlists": ["Saved for later"]
+    }
+  ]
+}

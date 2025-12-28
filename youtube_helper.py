@@ -274,6 +274,43 @@ def setup_argparse() -> argparse.ArgumentParser:
         help="Custom Jinja2 template file (default: built-in playlist.html)",
     )
     
+    # Export command - process entire Google Takeout playlist export
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Process entire Google Takeout playlist export folder to HTML",
+    )
+    export_parser.add_argument(
+        "-i", "--input",
+        type=str,
+        required=True,
+        help="Path to Google Takeout playlist export folder (contains playlists.csv)",
+    )
+    export_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        help="Output HTML file path (default: ~/.youtube-helper/exports/YYYY-MM-DD.HH.MM.SS.html)",
+    )
+    export_parser.add_argument(
+        "-t", "--title",
+        type=str,
+        help="Page title (default: 'YouTube Takeout Export')",
+    )
+    export_parser.add_argument(
+        "--api-key",
+        type=str,
+        help="YouTube Data API key (or set YOUTUBE_API_KEY env var)",
+    )
+    export_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose output",
+    )
+    export_parser.add_argument(
+        "--template",
+        type=str,
+        help="Custom Jinja2 template file (default: built-in playlist.html)",
+    )
+    
     return parser
 
 
@@ -1243,6 +1280,309 @@ def render_playlist_to_html(
     print(f"✓ Rendered {len(videos)} videos to {output_path}")
 
 
+def get_export_output_path() -> Path:
+    """
+    Generate default export output path with ISO timestamp.
+    
+    Returns:
+        Path like ~/.youtube-helper/exports/2025-12-21.10.30.45.html
+    """
+    exports_dir = get_config_dir() / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Format: YYYY-MM-DD.HH.MM.SS
+    timestamp = datetime.now().strftime("%Y-%m-%d.%H.%M.%S")
+    return exports_dir / f"{timestamp}.html"
+
+
+def parse_takeout_playlists_csv(playlists_csv_path: Path) -> dict[str, str]:
+    """
+    Parse Google Takeout playlists.csv to get playlist titles.
+    
+    Args:
+        playlists_csv_path: Path to playlists.csv
+        
+    Returns:
+        Dict mapping playlist ID to playlist title
+    """
+    playlists = {}
+    with open(playlists_csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            playlist_id = row.get('Playlist ID', '')
+            title = row.get('Playlist Title (Original)', '')
+            if playlist_id and title:
+                playlists[playlist_id] = title
+    return playlists
+
+
+def process_takeout_export(
+    input_dir: Path,
+    output_path: Optional[Path],
+    title: Optional[str],
+    api_key: str,
+    template_path: Optional[Path] = None,
+    verbose: bool = False,
+):
+    """
+    Process entire Google Takeout playlist export folder to HTML.
+    
+    Args:
+        input_dir: Path to takeout export folder (contains playlists.csv)
+        output_path: Path to output HTML file (or None for default)
+        title: Page title (optional)
+        api_key: YouTube Data API key
+        template_path: Path to custom Jinja2 template (optional)
+        verbose: Enable verbose output
+    """
+    # Validate input directory
+    playlists_csv = input_dir / "playlists.csv"
+    if not playlists_csv.exists():
+        raise FileNotFoundError(f"playlists.csv not found in {input_dir}")
+    
+    # Parse playlists.csv to get playlist names
+    playlist_titles = parse_takeout_playlists_csv(playlists_csv)
+    
+    if verbose:
+        print(f"Found {len(playlist_titles)} playlists in playlists.csv")
+        for pid, ptitle in playlist_titles.items():
+            print(f"  - {ptitle} ({pid})")
+    
+    # Find all *-videos.csv files
+    video_files = list(input_dir.glob("*-videos.csv"))
+    
+    if not video_files:
+        raise FileNotFoundError(f"No *-videos.csv files found in {input_dir}")
+    
+    if verbose:
+        print(f"Found {len(video_files)} playlist video files")
+    
+    # Build mapping of video_id -> list of playlist names
+    video_to_playlists: dict[str, list[str]] = {}
+    all_videos: list[dict] = []
+    seen_video_ids: set[str] = set()
+    
+    for video_file in video_files:
+        # Extract playlist name from filename (e.g., "Saved for later-videos.csv" -> "Saved for later")
+        playlist_name = video_file.stem.replace("-videos", "")
+        
+        videos = parse_takeout_csv(video_file)
+        
+        if verbose:
+            print(f"  {playlist_name}: {len(videos)} videos")
+        
+        for video in videos:
+            video_id = video['video_id']
+            
+            # Track which playlists this video appears in
+            if video_id not in video_to_playlists:
+                video_to_playlists[video_id] = []
+            video_to_playlists[video_id].append(playlist_name)
+            
+            # Only add video once (use first occurrence for added_at)
+            if video_id not in seen_video_ids:
+                seen_video_ids.add(video_id)
+                all_videos.append(video)
+    
+    print(f"\nFound {len(all_videos)} unique videos across {len(video_files)} playlists")
+    
+    # Enrich videos with YouTube API
+    enriched_videos = []
+    channels_by_id: dict[str, dict] = {}
+    video_cache_hits = 0
+    channel_cache_hits = 0
+    api_calls = 0
+    api_success = 0
+    api_errors = 0
+    consecutive_api_errors = 0
+    videos_not_found = 0
+    processing_errors = 0
+    aborted = False
+    
+    with Cache() as cache:
+        progress = tqdm(all_videos, desc="Enriching videos", unit="video")
+        for video in progress:
+            video_id = video['video_id'].strip()
+            added_at = video['added_at']
+            
+            # Check cache first
+            cached = cache.get_video(video_id)
+            if cached:
+                video_cache_hits += 1
+                consecutive_api_errors = 0
+                video_payload = cached
+            else:
+                # Fetch from API
+                api_calls += 1
+                try:
+                    result, error_details = fetch_video_metadata(video_id, api_key)
+                    if result:
+                        api_success += 1
+                        consecutive_api_errors = 0
+                        result['_extracted_at'] = datetime.now(timezone.utc).isoformat()
+                        cache.put_video(video_id, result)
+                        video_payload = result
+                    elif error_details:
+                        api_errors += 1
+                        consecutive_api_errors += 1
+                        if error_details.get('error_code') == 'videoNotFound':
+                            videos_not_found += 1
+                        else:
+                            processing_errors += 1
+                        enriched_videos.append({
+                            'video_id': video_id,
+                            'added_at': added_at,
+                            'error': error_details.get('message', 'Unknown error'),
+                            'appears_in_playlists': video_to_playlists.get(video_id, []),
+                        })
+                        continue
+                    else:
+                        videos_not_found += 1
+                        enriched_videos.append({
+                            'video_id': video_id,
+                            'added_at': added_at,
+                            'error': 'Video not found',
+                            'appears_in_playlists': video_to_playlists.get(video_id, []),
+                        })
+                        continue
+                except requests.RequestException as e:
+                    api_errors += 1
+                    consecutive_api_errors += 1
+                    processing_errors += 1
+                    enriched_videos.append({
+                        'video_id': video_id,
+                        'added_at': added_at,
+                        'error': str(e),
+                        'appears_in_playlists': video_to_playlists.get(video_id, []),
+                    })
+                    continue
+            
+            # Fetch channel data if not already cached
+            channel_id = video_payload.get('channel_id')
+            if channel_id and channel_id not in channels_by_id:
+                cached_channel = cache.get_channel(channel_id)
+                if cached_channel:
+                    channel_cache_hits += 1
+                    channels_by_id[channel_id] = cached_channel
+                else:
+                    api_calls += 1
+                    try:
+                        channel_data = fetch_channel_metadata(channel_id, api_key)
+                        if channel_data:
+                            api_success += 1
+                            channel_data['_extracted_at'] = datetime.now(timezone.utc).isoformat()
+                            cache.put_channel(channel_id, channel_data)
+                            channels_by_id[channel_id] = channel_data
+                    except requests.RequestException:
+                        api_errors += 1
+                        consecutive_api_errors += 1
+            
+            # Build enriched video entry
+            output_video = {
+                'video_id': video_id,
+                'title': video_payload.get('title'),
+                'description': video_payload.get('description'),
+                'thumbnail_url': video_payload.get('thumbnail_url'),
+                'channel_id': channel_id,
+                'privacy_status': video_payload.get('privacy_status'),
+                'statistics': video_payload.get('statistics'),
+                'topicDetails': video_payload.get('topicDetails'),
+                'video_data_extracted_at': video_payload.get('_extracted_at'),
+                'added_at': added_at,
+                'appears_in_playlists': video_to_playlists.get(video_id, []),
+            }
+            enriched_videos.append(output_video)
+            
+            progress.set_postfix({
+                'cached': video_cache_hits,
+                'fetched': api_success,
+                'errors': processing_errors,
+            })
+            
+            if consecutive_api_errors >= 10:
+                aborted = True
+                print("\nAborting: 10 consecutive API errors")
+                break
+    
+    if aborted:
+        return
+    
+    # Build channels output
+    channels_output = {}
+    for cid, channel_data in channels_by_id.items():
+        channels_output[cid] = {
+            'id': channel_data.get('id', cid),
+            'title': channel_data.get('title'),
+            'publishedAt': channel_data.get('publishedAt'),
+            'channel_data_extracted_at': channel_data.get('_extracted_at'),
+            'subscriber_count': channel_data.get('subscriber_count'),
+            'url': channel_data.get('url'),
+            'description': channel_data.get('description'),
+            'thumbnail_url': channel_data.get('thumbnail_url'),
+            'country': channel_data.get('country'),
+            'topicIds': channel_data.get('topicIds', []),
+            'topicCategories': channel_data.get('topicCategories', []),
+        }
+    
+    # Build metadata
+    metadata = {
+        'source_dir': str(input_dir),
+        'total_videos': len(all_videos),
+        'total_playlists': len(video_files),
+        'total_channels': len(channels_output),
+        'enriched_at': datetime.now(timezone.utc).isoformat(),
+        'video_cache_hits': video_cache_hits,
+        'channel_cache_hits': channel_cache_hits,
+        'api_calls': api_calls,
+        'api_success': api_success,
+        'api_errors': api_errors,
+        'videos_not_found': videos_not_found,
+    }
+    
+    # Determine output path
+    if output_path is None:
+        output_path = get_export_output_path()
+    
+    # Ensure parent directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Setup Jinja2 and render
+    if template_path:
+        template_dir = template_path.parent
+        template_name = template_path.name
+    else:
+        template_dir = Path(__file__).parent / 'templates'
+        template_name = 'playlist.html'
+    
+    env = Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(['html', 'xml'])
+    )
+    env.filters['format_number'] = format_number
+    
+    template = env.get_template(template_name)
+    
+    html_content = template.render(
+        title=title or 'YouTube Takeout Export',
+        videos=enriched_videos,
+        channels=channels_output,
+        metadata=metadata,
+    )
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    # Summary
+    print(f"\n✓ Export complete!")
+    print(f"  Videos processed: {len(enriched_videos)}")
+    print(f"  Videos from cache: {video_cache_hits}")
+    print(f"  Videos fetched: {api_success}")
+    print(f"  Videos not found: {videos_not_found}")
+    print(f"  Channels: {len(channels_output)}")
+    print(f"  API calls: {api_calls}")
+    print(f"  Output: {output_path}")
+
+
 def compare_enriched_with_playlist(playlist_path: Path, enriched_path: Path, output_path: Path):
     """
     Compare enriched JSON output with original playlist CSV.
@@ -1496,6 +1836,29 @@ def main():
             output_path = Path(args.output)
             template_path = Path(args.template) if args.template else None
             render_playlist_to_html(input_path, output_path, args.title, template_path)
+            return 0
+        
+        elif args.command == "export":
+            input_dir = Path(args.input)
+            if not input_dir.is_dir():
+                print(f"Error: Input path is not a directory: {args.input}", file=sys.stderr)
+                return 1
+            
+            api_key = get_api_key(args.api_key)
+            if not api_key:
+                print(f"Error: YouTube API key required. Use --api-key, set {YOUTUBE_API_KEY_ENV_VAR} env var, or run 'config set-api-key'.", file=sys.stderr)
+                return 1
+            
+            output_path = Path(args.output) if args.output else None
+            template_path = Path(args.template) if args.template else None
+            process_takeout_export(
+                input_dir,
+                output_path,
+                args.title,
+                api_key,
+                template_path,
+                args.verbose,
+            )
             return 0
         
         return 0
