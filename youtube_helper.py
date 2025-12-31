@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,6 +151,12 @@ def setup_argparse() -> argparse.ArgumentParser:
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose output",
+    )
+    enrich_parser.add_argument(
+        "--sqlite",
+        type=str,
+        dest="sqlite_output",
+        help="Output SQLite database file with enriched data",
     )
     
     # Config command - manage API key and settings
@@ -309,6 +316,12 @@ def setup_argparse() -> argparse.ArgumentParser:
         "--template",
         type=str,
         help="Custom Jinja2 template file (default: built-in playlist.html)",
+    )
+    export_parser.add_argument(
+        "--sqlite",
+        type=str,
+        dest="sqlite_output",
+        help="Output SQLite database file with enriched data",
     )
     
     return parser
@@ -519,7 +532,7 @@ def fetch_channel_metadata(channel_id: str, api_key: str) -> Optional[dict]:
     }
 
 
-def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: bool = False):
+def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: bool = False, sqlite_path: Optional[Path] = None):
     """
     Enrich Google Takeout playlist CSV with YouTube metadata.
     
@@ -527,6 +540,8 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
         input_path: Path to input CSV from Google Takeout
         output_path: Path to output JSON file
         api_key: YouTube Data API key
+        verbose: Enable verbose logging
+        sqlite_path: Optional path to output SQLite database
         verbose: Enable verbose logging
     """
     # Parse input CSV
@@ -789,6 +804,14 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
     
+    # Export to SQLite if path provided
+    if sqlite_path:
+        export_to_sqlite(
+            db_path=sqlite_path,
+            enriched_videos=enriched_videos,
+            channels_by_id=channels_by_id,
+        )
+    
     # Summary
     print(f"\n✓ Enriched {len(enriched_videos)} videos")
     print(f"  Videos from cache: {video_cache_hits}")
@@ -801,6 +824,214 @@ def enrich_playlist(input_path: Path, output_path: Path, api_key: str, verbose: 
         print(f"  Errors logged: {len(errors)}")
         print(f"  Error log: {ERROR_LOG_PATH}")
     print(f"  Output: {output_path}")
+    if sqlite_path:
+        print(f"  SQLite: {sqlite_path}")
+
+
+def export_to_sqlite(
+    db_path: Path,
+    enriched_videos: list[dict],
+    channels_by_id: dict[str, dict],
+    playlist_info: Optional[dict] = None,
+    video_to_playlists: Optional[dict[str, list[str]]] = None,
+) -> None:
+    """
+    Export enriched playlist data to a self-contained SQLite database.
+    
+    Args:
+        db_path: Path to output SQLite database
+        enriched_videos: List of enriched video dictionaries
+        channels_by_id: Dict of channel_id -> channel data
+        playlist_info: Optional dict with playlist metadata (from takeout CSV)
+        video_to_playlists: Optional dict mapping video_id -> list of playlist names
+    """
+    # Remove existing database if it exists
+    if db_path.exists():
+        db_path.unlink()
+    
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    
+    # Create videos table
+    cursor.execute("""
+        CREATE TABLE videos (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            description TEXT,
+            thumbnail_url TEXT,
+            channel_id TEXT,
+            privacy_status TEXT,
+            view_count INTEGER,
+            like_count INTEGER,
+            comment_count INTEGER,
+            topics TEXT,
+            playlists TEXT,
+            added_at TEXT,
+            extracted_at TEXT,
+            error TEXT,
+            FOREIGN KEY (channel_id) REFERENCES channels(id)
+        )
+    """)
+    
+    # Create playlists table
+    cursor.execute("""
+        CREATE TABLE playlists (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            visibility TEXT,
+            video_order TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            add_new_videos_to_top INTEGER
+        )
+    """)
+    
+    # Create channels table
+    cursor.execute("""
+        CREATE TABLE channels (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            description TEXT,
+            url TEXT,
+            thumbnail_url TEXT,
+            country TEXT,
+            subscriber_count INTEGER,
+            published_at TEXT,
+            topic_ids TEXT,
+            topic_categories TEXT,
+            extracted_at TEXT
+        )
+    """)
+    
+    # Create video_playlists junction table for many-to-many relationship
+    cursor.execute("""
+        CREATE TABLE video_playlists (
+            video_id TEXT,
+            playlist_id TEXT,
+            added_at TEXT,
+            PRIMARY KEY (video_id, playlist_id),
+            FOREIGN KEY (video_id) REFERENCES videos(id),
+            FOREIGN KEY (playlist_id) REFERENCES playlists(id)
+        )
+    """)
+    
+    # Insert channels
+    for channel_id, channel_data in channels_by_id.items():
+        try:
+            subscriber_count = int(channel_data.get('subscriber_count', 0)) if channel_data.get('subscriber_count') else None
+        except (ValueError, TypeError):
+            subscriber_count = None
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO channels (
+                id, title, description, url, thumbnail_url, country,
+                subscriber_count, published_at, topic_ids, topic_categories, extracted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            channel_id,
+            channel_data.get('title'),
+            channel_data.get('description'),
+            channel_data.get('url'),
+            channel_data.get('thumbnail_url'),
+            channel_data.get('country'),
+            subscriber_count,
+            channel_data.get('publishedAt'),
+            json.dumps(channel_data.get('topicIds', [])),
+            json.dumps(channel_data.get('topicCategories', [])),
+            channel_data.get('_extracted_at'),
+        ))
+    
+    # Insert playlists if provided
+    playlist_id_map = {}  # title -> id mapping for junction table
+    if playlist_info:
+        for playlist_id, pdata in playlist_info.items():
+            add_new = 1 if pdata.get('add_new_videos_to_top', '').lower() == 'true' else 0
+            cursor.execute("""
+                INSERT OR REPLACE INTO playlists (
+                    id, title, visibility, video_order, created_at, updated_at, add_new_videos_to_top
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                playlist_id,
+                pdata.get('title'),
+                pdata.get('visibility'),
+                pdata.get('video_order'),
+                pdata.get('created_at'),
+                pdata.get('updated_at'),
+                add_new,
+            ))
+            # Map title to ID for junction table
+            if pdata.get('title'):
+                playlist_id_map[pdata['title']] = playlist_id
+    
+    # Insert videos
+    for video in enriched_videos:
+        video_id = video.get('video_id')
+        if not video_id:
+            continue
+        
+        # Extract statistics
+        stats = video.get('statistics') or {}
+        try:
+            view_count = int(stats.get('viewCount', 0)) if stats.get('viewCount') else None
+        except (ValueError, TypeError):
+            view_count = None
+        try:
+            like_count = int(stats.get('likeCount', 0)) if stats.get('likeCount') else None
+        except (ValueError, TypeError):
+            like_count = None
+        try:
+            comment_count = int(stats.get('commentCount', 0)) if stats.get('commentCount') else None
+        except (ValueError, TypeError):
+            comment_count = None
+        
+        # Extract topics as JSON-encoded list
+        topic_details = video.get('topicDetails') or {}
+        topics = topic_details.get('topicCategories', [])
+        
+        # Get playlists this video appears in
+        playlists_list = video.get('appears_in_playlists', [])
+        if not playlists_list and video_to_playlists:
+            playlists_list = video_to_playlists.get(video_id, [])
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO videos (
+                id, title, description, thumbnail_url, channel_id, privacy_status,
+                view_count, like_count, comment_count, topics, playlists,
+                added_at, extracted_at, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            video_id,
+            video.get('title'),
+            video.get('description'),
+            video.get('thumbnail_url'),
+            video.get('channel_id'),
+            video.get('privacy_status'),
+            view_count,
+            like_count,
+            comment_count,
+            json.dumps(topics),
+            json.dumps(playlists_list),
+            video.get('added_at'),
+            video.get('video_data_extracted_at') or video.get('_extracted_at'),
+            video.get('error'),
+        ))
+        
+        # Insert video-playlist relationships
+        for playlist_name in playlists_list:
+            playlist_id = playlist_id_map.get(playlist_name)
+            if playlist_id:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO video_playlists (video_id, playlist_id, added_at)
+                    VALUES (?, ?, ?)
+                """, (video_id, playlist_id, video.get('added_at')))
+    
+    # Create indexes for better query performance
+    cursor.execute("CREATE INDEX idx_videos_channel_id ON videos(channel_id)")
+    cursor.execute("CREATE INDEX idx_videos_added_at ON videos(added_at)")
+    cursor.execute("CREATE INDEX idx_video_playlists_playlist_id ON video_playlists(playlist_id)")
+    
+    conn.commit()
+    conn.close()
 
 
 def get_config_dir() -> Path:
@@ -1316,6 +1547,33 @@ def parse_takeout_playlists_csv(playlists_csv_path: Path) -> dict[str, str]:
     return playlists
 
 
+def parse_takeout_playlists_csv_full(playlists_csv_path: Path) -> dict[str, dict]:
+    """
+    Parse Google Takeout playlists.csv to get full playlist information.
+    
+    Args:
+        playlists_csv_path: Path to playlists.csv
+        
+    Returns:
+        Dict mapping playlist ID to full playlist data
+    """
+    playlists = {}
+    with open(playlists_csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            playlist_id = row.get('Playlist ID', '')
+            if playlist_id:
+                playlists[playlist_id] = {
+                    'title': row.get('Playlist Title (Original)', ''),
+                    'visibility': row.get('Playlist Visibility', ''),
+                    'video_order': row.get('Playlist Video Order', ''),
+                    'created_at': row.get('Playlist Create Timestamp', ''),
+                    'updated_at': row.get('Playlist Update Timestamp', ''),
+                    'add_new_videos_to_top': row.get('Add new videos to top', ''),
+                }
+    return playlists
+
+
 def process_takeout_export(
     input_dir: Path,
     output_path: Optional[Path],
@@ -1323,6 +1581,7 @@ def process_takeout_export(
     api_key: str,
     template_path: Optional[Path] = None,
     verbose: bool = False,
+    sqlite_path: Optional[Path] = None,
 ):
     """
     Process entire Google Takeout playlist export folder to HTML.
@@ -1334,14 +1593,16 @@ def process_takeout_export(
         api_key: YouTube Data API key
         template_path: Path to custom Jinja2 template (optional)
         verbose: Enable verbose output
+        sqlite_path: Optional path to output SQLite database
     """
     # Validate input directory
     playlists_csv = input_dir / "playlists.csv"
     if not playlists_csv.exists():
         raise FileNotFoundError(f"playlists.csv not found in {input_dir}")
     
-    # Parse playlists.csv to get playlist names
+    # Parse playlists.csv to get playlist info (full info for SQLite, titles for display)
     playlist_titles = parse_takeout_playlists_csv(playlists_csv)
+    playlist_full_info = parse_takeout_playlists_csv_full(playlists_csv)
     
     if verbose:
         print(f"Found {len(playlist_titles)} playlists in playlists.csv")
@@ -1572,6 +1833,16 @@ def process_takeout_export(
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
     
+    # Export to SQLite if path provided
+    if sqlite_path:
+        export_to_sqlite(
+            db_path=sqlite_path,
+            enriched_videos=enriched_videos,
+            channels_by_id=channels_by_id,
+            playlist_info=playlist_full_info,
+            video_to_playlists=video_to_playlists,
+        )
+    
     # Summary
     print(f"\n✓ Export complete!")
     print(f"  Videos processed: {len(enriched_videos)}")
@@ -1581,6 +1852,8 @@ def process_takeout_export(
     print(f"  Channels: {len(channels_output)}")
     print(f"  API calls: {api_calls}")
     print(f"  Output: {output_path}")
+    if sqlite_path:
+        print(f"  SQLite: {sqlite_path}")
 
 
 def compare_enriched_with_playlist(playlist_path: Path, enriched_path: Path, output_path: Path):
@@ -1756,7 +2029,8 @@ def main():
             
             input_path = validate_input_file(args.input)
             output_path = Path(args.output)
-            enrich_playlist(input_path, output_path, api_key, args.verbose)
+            sqlite_path = Path(args.sqlite_output) if args.sqlite_output else None
+            enrich_playlist(input_path, output_path, api_key, args.verbose, sqlite_path)
         
         elif args.command == "config":
             if args.config_action == "set-api-key":
@@ -1851,6 +2125,7 @@ def main():
             
             output_path = Path(args.output) if args.output else None
             template_path = Path(args.template) if args.template else None
+            sqlite_path = Path(args.sqlite_output) if args.sqlite_output else None
             process_takeout_export(
                 input_dir,
                 output_path,
@@ -1858,6 +2133,7 @@ def main():
                 api_key,
                 template_path,
                 args.verbose,
+                sqlite_path,
             )
             return 0
         
